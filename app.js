@@ -24,6 +24,8 @@
   const spec = () => E.getSpec(data, state.specId);
   const plan = () => state.drafts[state.specId] || (state.drafts[state.specId] = E.emptyPlan(spec()));
   let toastTimer, tooltipTimer;
+  const hoverPointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+  let keyboardNavigation = false;
   function toast(message, error) {
     clearTimeout(toastTimer); $('toast').textContent = message; $('toast').className = `toast${error ? ' error' : ''}`; $('toast').hidden = false;
     toastTimer = setTimeout(() => { $('toast').hidden = true; }, error ? 7500 : 4600);
@@ -103,7 +105,7 @@
       const required = [...(talent.requiresCore || []), ...(talent.requiresTalents || [])];
       return `<article class="candidate${selected ? ' selected' : ''}${!available.allowed ? ' locked' : ''}" data-talent="${esc(talent.id)}"><button class="candidate-main" data-select="${esc(talent.id)}" aria-pressed="${selected}" aria-disabled="${!available.allowed}" aria-label="${esc(talent.name + (selected ? '，已选，点击取消' : !available.allowed ? '，' + available.reason : '，点击选择'))}"><span class="candidate-glyph" aria-hidden="true">${esc(talent.name.slice(0, 1))}</span><span class="candidate-text"><span class="candidate-name">${highlighted(talent.name)}</span>${required.length ? `<span class="candidate-requirement">${available.allowed ? '' : '◇ '}${esc(required.join(' / '))}</span>` : ''}</span></button><button class="candidate-info" data-detail="${esc(talent.id)}" aria-label="查看${esc(talent.name)}说明">ⓘ</button>${selected ? '<span class="candidate-selected" aria-hidden="true">✓</span>' : ''}</article>`;
     }).join('') || '<div class="no-match">没有匹配的奇穴</div>';
-    $('candidate-note').textContent = pool ? '点击已选项可取消；选满 3 个后，新增前需先取消一个。' : '选中后收起；悬停或点击 ⓘ 查看完整说明。';
+    $('candidate-note').textContent = pool ? '点击已选项可取消；选满 3 个后，新增前需先取消一个。' : '选中后收起；点击 ⓘ 查看完整说明。';
     positionMenu();
   }
   function openMenu(group, key, keyboard) {
@@ -140,7 +142,9 @@
     const menuRect = state.group === null ? rect : $('candidate-menu').getBoundingClientRect();
     let left = menuRect.right + 10;
     if (left + box.offsetWidth > innerWidth - 12) left = menuRect.left - box.offsetWidth - 10;
-    if (left < 12) left = Math.max(12, Math.min(rect.left, innerWidth - box.offsetWidth - 12));
+    // A narrow screen has no side gutter: use the explicit info dialog instead
+    // of putting a pointer-interactive tooltip over the choice being pressed.
+    if (left < 12) { hideTooltip(); return; }
     let top = state.group === null ? rect.bottom + 10 : rect.top;
     top = Math.max(12, Math.min(top, innerHeight - box.offsetHeight - 12));
     box.style.left = `${left}px`; box.style.top = `${top}px`;
@@ -202,12 +206,19 @@
     const closeButton = event.target.closest('[data-close]'); if (closeButton) { $(closeButton.dataset.close).close(); return; }
     if (state.group !== null && !event.target.closest('#candidate-menu') && !event.target.closest('#talent-tooltip') && !event.target.closest('dialog')) closeMenu();
   });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') { hideTooltip(); if (state.group !== null && !document.querySelector('dialog[open]')) { event.preventDefault(); closeMenu(true); } } });
+  function usePointerInput() { keyboardNavigation = false; hideTooltip(); }
+  document.addEventListener('pointerdown', usePointerInput, { capture: true, passive: true });
+  // Older mobile browsers may expose touch events before compatibility mouse events.
+  document.addEventListener('touchstart', usePointerInput, { capture: true, passive: true });
+  document.addEventListener('keydown', event => {
+    if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) keyboardNavigation = true;
+    if (event.key === 'Escape') { hideTooltip(); if (state.group !== null && !document.querySelector('dialog[open]')) { event.preventDefault(); closeMenu(true); } }
+  }, true);
   function tooltipFromEvent(event) { const target = event.target.closest('[data-talent]'); if (target) showTooltip(target.dataset.talent, target); }
   [$('slot-strip'), $('candidate-list')].forEach(region => {
-    region.addEventListener('pointerover', event => { if (event.pointerType !== 'touch') tooltipFromEvent(event); });
+    region.addEventListener('pointerover', event => { if (event.pointerType === 'mouse' && hoverPointer.matches) tooltipFromEvent(event); });
     region.addEventListener('pointerleave', scheduleHideTooltip);
-    region.addEventListener('focusin', tooltipFromEvent);
+    region.addEventListener('focusin', event => { if (keyboardNavigation) tooltipFromEvent(event); });
     region.addEventListener('focusout', scheduleHideTooltip);
   });
   $('talent-tooltip').addEventListener('pointerenter', () => clearTimeout(tooltipTimer)); $('talent-tooltip').addEventListener('pointerleave', scheduleHideTooltip);
